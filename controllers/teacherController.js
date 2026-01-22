@@ -109,7 +109,7 @@ exports.createTeacher = async (req, res) => {
 // @access  Private
 exports.getAllTeachers = async (req, res) => {
   try {
-    const { subject, search, page = 1, limit = 9 } = req.query;
+    const { subject, search, page = 1, limit = 1000 } = req.query;
 
     let query = {};
 
