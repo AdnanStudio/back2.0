@@ -49,6 +49,10 @@ const clubRoutes = require('./routes/clubRoutes');
 const teacherListRoutes = require('./routes/teacherListRoutes');
 const libraryRoutes = require('./routes/libraryRoutes'); // ✅ NEW
 
+const governingBodyRoutes = require('./routes/governingBodyRoutes');
+
+
+
 // Use Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/students', studentRoutes);
@@ -75,6 +79,8 @@ app.use('/api/teacher-trainings', teacherTrainingRoutes);
 app.use('/api/club-members', clubRoutes);
 app.use('/api/teacher-list', teacherListRoutes);
 app.use('/api/library', libraryRoutes); // ✅ NEW
+// Then mount the route
+app.use('/api/governing-body', governingBodyRoutes);
 
 app.get('/', (req, res) => {
   res.json({
