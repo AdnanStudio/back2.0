@@ -9,19 +9,19 @@ const {
   toggleTrainingStatus
 } = require('../controllers/teacherTrainingController');
 const { protect, isAdmin } = require('../middleware/auth');
-const { upload } = require('../config/cloudinary');
+const { uploadTeacherTraining } = require('../config/cloudinary');
 
 // Public routes
 router.get('/', getAllTrainings);
+
+// ✅ Specific sub-routes BEFORE /:id
+router.put('/:id/status', protect, isAdmin, toggleTrainingStatus);
+
 router.get('/:id', getTraining);
 
 // Protected routes (Admin only)
-router.use(protect);
-router.use(isAdmin);
-
-router.post('/', upload.single('image'), createTraining);
-router.put('/:id', upload.single('image'), updateTraining);
-router.delete('/:id', deleteTraining);
-router.put('/:id/status', toggleTrainingStatus);
+router.post('/', protect, isAdmin, uploadTeacherTraining.single('image'), createTraining);
+router.put('/:id', protect, isAdmin, uploadTeacherTraining.single('image'), updateTraining);
+router.delete('/:id', protect, isAdmin, deleteTraining);
 
 module.exports = router;

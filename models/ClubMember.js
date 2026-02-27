@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const clubMemberSchema = new mongoose.Schema({
   name: {
     type: String,
-    required: [true, 'Member name is required'],
+    required: [true, 'Club name is required'],
     trim: true
   },
   image: {
@@ -12,7 +12,55 @@ const clubMemberSchema = new mongoose.Schema({
   },
   description: {
     type: String,
-    required: [true, 'Description is required']
+    default: ''
+  },
+  category: {
+    type: String,
+    default: 'Other'
+  },
+  advisor: {
+    type: String,
+    default: ''
+  },
+  president: {
+    type: String,
+    default: ''
+  },
+  vicePresident: {
+    type: String,
+    default: ''
+  },
+  meetingDay: {
+    type: String,
+    default: ''
+  },
+  meetingTime: {
+    type: String,
+    default: ''
+  },
+  meetingVenue: {
+    type: String,
+    default: ''
+  },
+  establishedDate: {
+    type: Date
+  },
+  budget: {
+    type: String,
+    default: ''
+  },
+  activities: {
+    type: String,
+    default: ''
+  },
+  achievements: {
+    type: String,
+    default: ''
+  },
+  status: {
+    type: String,
+    enum: ['active', 'inactive', 'suspended'],
+    default: 'active'
   },
   isActive: {
     type: Boolean,
@@ -22,8 +70,6 @@ const clubMemberSchema = new mongoose.Schema({
     type: Number,
     default: 0
   }
-}, {
-  timestamps: true
-});
+}, { timestamps: true });
 
 module.exports = mongoose.model('ClubMember', clubMemberSchema);

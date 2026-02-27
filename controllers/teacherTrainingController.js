@@ -1,9 +1,15 @@
 const TeacherTraining = require('../models/TeacherTraining');
 const { cloudinary } = require('../config/cloudinary');
 
+// @desc    Get all trainings
+// @route   GET /api/teacher-trainings
+// @access  Public / Admin sees all
 exports.getAllTrainings = async (req, res) => {
   try {
-    const trainings = await TeacherTraining.find({ isActive: true })
+    // Admin sees all; public sees active only
+    const query = req.user?.role === 'admin' ? {} : { isActive: true };
+
+    const trainings = await TeacherTraining.find(query)
       .sort({ order: 1, createdAt: -1 });
 
     res.status(200).json({
@@ -12,37 +18,19 @@ exports.getAllTrainings = async (req, res) => {
       data: trainings
     });
   } catch (error) {
-    console.error('Get trainings error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch trainings',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to fetch trainings', error: error.message });
   }
 };
 
 exports.getTraining = async (req, res) => {
   try {
     const training = await TeacherTraining.findById(req.params.id);
-
     if (!training) {
-      return res.status(404).json({
-        success: false,
-        message: 'Training not found'
-      });
+      return res.status(404).json({ success: false, message: 'Training not found' });
     }
-
-    res.status(200).json({
-      success: true,
-      data: training
-    });
+    res.status(200).json({ success: true, data: training });
   } catch (error) {
-    console.error('Get training error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch training',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to fetch training', error: error.message });
   }
 };
 
@@ -66,36 +54,23 @@ exports.createTraining = async (req, res) => {
     });
   } catch (error) {
     console.error('Create training error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to create training',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to create training', error: error.message });
   }
 };
 
 exports.updateTraining = async (req, res) => {
   try {
     let training = await TeacherTraining.findById(req.params.id);
-
     if (!training) {
-      return res.status(404).json({
-        success: false,
-        message: 'Training not found'
-      });
+      return res.status(404).json({ success: false, message: 'Training not found' });
     }
 
     const updateData = { ...req.body };
 
     if (req.file) {
       if (training.image?.publicId) {
-        try {
-          await cloudinary.uploader.destroy(training.image.publicId);
-        } catch (err) {
-          console.error('Cloudinary delete error:', err);
-        }
+        try { await cloudinary.uploader.destroy(training.image.publicId); } catch {}
       }
-
       updateData.image = {
         url: req.file.path,
         publicId: req.file.filename
@@ -108,65 +83,36 @@ exports.updateTraining = async (req, res) => {
       { new: true, runValidators: true }
     );
 
-    res.status(200).json({
-      success: true,
-      message: 'Training updated successfully',
-      data: training
-    });
+    res.status(200).json({ success: true, message: 'Training updated successfully', data: training });
   } catch (error) {
-    console.error('Update training error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update training',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to update training', error: error.message });
   }
 };
 
 exports.deleteTraining = async (req, res) => {
   try {
     const training = await TeacherTraining.findById(req.params.id);
-
     if (!training) {
-      return res.status(404).json({
-        success: false,
-        message: 'Training not found'
-      });
+      return res.status(404).json({ success: false, message: 'Training not found' });
     }
 
     if (training.image?.publicId) {
-      try {
-        await cloudinary.uploader.destroy(training.image.publicId);
-      } catch (err) {
-        console.error('Cloudinary delete error:', err);
-      }
+      try { await cloudinary.uploader.destroy(training.image.publicId); } catch {}
     }
 
     await training.deleteOne();
 
-    res.status(200).json({
-      success: true,
-      message: 'Training deleted successfully'
-    });
+    res.status(200).json({ success: true, message: 'Training deleted successfully' });
   } catch (error) {
-    console.error('Delete training error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to delete training',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to delete training', error: error.message });
   }
 };
 
 exports.toggleTrainingStatus = async (req, res) => {
   try {
     const training = await TeacherTraining.findById(req.params.id);
-
     if (!training) {
-      return res.status(404).json({
-        success: false,
-        message: 'Training not found'
-      });
+      return res.status(404).json({ success: false, message: 'Training not found' });
     }
 
     training.isActive = !training.isActive;
@@ -178,11 +124,6 @@ exports.toggleTrainingStatus = async (req, res) => {
       data: { isActive: training.isActive }
     });
   } catch (error) {
-    console.error('Toggle status error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to toggle status',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to toggle status', error: error.message });
   }
 };

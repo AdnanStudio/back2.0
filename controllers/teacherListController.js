@@ -1,60 +1,50 @@
 const TeacherList = require('../models/TeacherList');
 const { cloudinary } = require('../config/cloudinary');
 
+// @desc    Get all teachers in the public list
+// @route   GET /api/teacher-list
+// @access  Public / Admin sees all
 exports.getAllTeachers = async (req, res) => {
   try {
     const { search } = req.query;
-    let query = { isActive: true };
 
-    const teachers = await TeacherList.find(query)
+    // Admin sees all; public/other roles see active only
+    const baseQuery = req.user?.role === 'admin' ? {} : { isActive: true };
+
+    let teachers = await TeacherList.find(baseQuery)
       .sort({ order: 1, createdAt: -1 });
 
-    let filteredTeachers = teachers;
+    // Search filter (in-memory for flexibility)
     if (search) {
-      filteredTeachers = teachers.filter(teacher =>
-        teacher.name.toLowerCase().includes(search.toLowerCase()) ||
-        teacher.designation.toLowerCase().includes(search.toLowerCase()) ||
-        (teacher.email && teacher.email.toLowerCase().includes(search.toLowerCase()))
+      const q = search.toLowerCase();
+      teachers = teachers.filter(t =>
+        t.name?.toLowerCase().includes(q) ||
+        t.designation?.toLowerCase().includes(q) ||
+        t.email?.toLowerCase().includes(q) ||
+        t.department?.toLowerCase().includes(q)
       );
     }
 
     res.status(200).json({
       success: true,
-      count: filteredTeachers.length,
-      data: filteredTeachers
+      count: teachers.length,
+      data: teachers
     });
   } catch (error) {
     console.error('Get teachers error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch teachers',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to fetch teachers', error: error.message });
   }
 };
 
 exports.getTeacher = async (req, res) => {
   try {
     const teacher = await TeacherList.findById(req.params.id);
-
     if (!teacher) {
-      return res.status(404).json({
-        success: false,
-        message: 'Teacher not found'
-      });
+      return res.status(404).json({ success: false, message: 'Teacher not found' });
     }
-
-    res.status(200).json({
-      success: true,
-      data: teacher
-    });
+    res.status(200).json({ success: true, data: teacher });
   } catch (error) {
-    console.error('Get teacher error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch teacher',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to fetch teacher', error: error.message });
   }
 };
 
@@ -62,11 +52,12 @@ exports.createTeacher = async (req, res) => {
   try {
     const teacherData = { ...req.body };
 
+    // Handle subjects as comma-separated string → array
     if (typeof teacherData.subjects === 'string') {
       teacherData.subjects = teacherData.subjects
         .split(',')
         .map(s => s.trim())
-        .filter(s => s);
+        .filter(Boolean);
     }
 
     if (req.file) {
@@ -85,23 +76,15 @@ exports.createTeacher = async (req, res) => {
     });
   } catch (error) {
     console.error('Create teacher error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to create teacher',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to create teacher', error: error.message });
   }
 };
 
 exports.updateTeacher = async (req, res) => {
   try {
     let teacher = await TeacherList.findById(req.params.id);
-
     if (!teacher) {
-      return res.status(404).json({
-        success: false,
-        message: 'Teacher not found'
-      });
+      return res.status(404).json({ success: false, message: 'Teacher not found' });
     }
 
     const updateData = { ...req.body };
@@ -110,18 +93,13 @@ exports.updateTeacher = async (req, res) => {
       updateData.subjects = updateData.subjects
         .split(',')
         .map(s => s.trim())
-        .filter(s => s);
+        .filter(Boolean);
     }
 
     if (req.file) {
       if (teacher.image?.publicId) {
-        try {
-          await cloudinary.uploader.destroy(teacher.image.publicId);
-        } catch (err) {
-          console.error('Cloudinary delete error:', err);
-        }
+        try { await cloudinary.uploader.destroy(teacher.image.publicId); } catch {}
       }
-
       updateData.image = {
         url: req.file.path,
         publicId: req.file.filename
@@ -134,81 +112,53 @@ exports.updateTeacher = async (req, res) => {
       { new: true, runValidators: true }
     );
 
-    res.status(200).json({
-      success: true,
-      message: 'Teacher updated successfully',
-      data: teacher
-    });
+    res.status(200).json({ success: true, message: 'Teacher updated successfully', data: teacher });
   } catch (error) {
-    console.error('Update teacher error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update teacher',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to update teacher', error: error.message });
   }
 };
 
 exports.deleteTeacher = async (req, res) => {
   try {
     const teacher = await TeacherList.findById(req.params.id);
-
     if (!teacher) {
-      return res.status(404).json({
-        success: false,
-        message: 'Teacher not found'
-      });
+      return res.status(404).json({ success: false, message: 'Teacher not found' });
     }
 
     if (teacher.image?.publicId) {
-      try {
-        await cloudinary.uploader.destroy(teacher.image.publicId);
-      } catch (err) {
-        console.error('Cloudinary delete error:', err);
-      }
+      try { await cloudinary.uploader.destroy(teacher.image.publicId); } catch {}
     }
 
     await teacher.deleteOne();
 
-    res.status(200).json({
-      success: true,
-      message: 'Teacher deleted successfully'
-    });
+    res.status(200).json({ success: true, message: 'Teacher deleted successfully' });
   } catch (error) {
-    console.error('Delete teacher error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to delete teacher',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to delete teacher', error: error.message });
   }
 };
 
 exports.toggleTeacherStatus = async (req, res) => {
   try {
     const teacher = await TeacherList.findById(req.params.id);
-
     if (!teacher) {
-      return res.status(404).json({
-        success: false,
-        message: 'Teacher not found'
-      });
+      return res.status(404).json({ success: false, message: 'Teacher not found' });
     }
 
     teacher.isActive = !teacher.isActive;
+    // Also sync status field if present
+    if (!teacher.isActive && teacher.status === 'active') {
+      teacher.status = 'on-leave';
+    } else if (teacher.isActive && (teacher.status === 'on-leave' || teacher.status === 'resigned')) {
+      teacher.status = 'active';
+    }
     await teacher.save();
 
     res.status(200).json({
       success: true,
       message: `Teacher ${teacher.isActive ? 'activated' : 'deactivated'} successfully`,
-      data: { isActive: teacher.isActive }
+      data: { isActive: teacher.isActive, status: teacher.status }
     });
   } catch (error) {
-    console.error('Toggle status error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to toggle status',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to toggle status', error: error.message });
   }
 };

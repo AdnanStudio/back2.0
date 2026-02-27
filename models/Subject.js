@@ -4,67 +4,66 @@ const subjectSchema = new mongoose.Schema({
   name: {
     type: String,
     required: [true, 'Subject name is required'],
-    trim: true,
-    unique: true
+    trim: true
   },
   code: {
     type: String,
-    required: [true, 'Subject code is required'],
     trim: true,
-    unique: true,
     uppercase: true
-  },
-  description: {
-    type: String,
-    trim: true
-  },
-  department: {
-    type: String,
-    enum: ['Science', 'Arts', 'Commerce', 'General'],
-    default: 'General'
   },
   class: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Class'
   },
+  department: {
+    type: String,
+    trim: true
+  },
   teacher: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Teacher'
   },
-  credits: {
+  // ===== MARK CONFIGURATION =====
+  theoryFullMarks: {
+    type: Number,
+    default: 100
+  },
+  hasPractical: {
+    type: Boolean,
+    default: false
+  },
+  practicalFullMarks: {
     type: Number,
     default: 0
   },
-  type: {
-    type: String,
-    enum: ['Theory', 'Practical', 'Both'],
-    default: 'Theory'
+  hasMCQ: {
+    type: Boolean,
+    default: false
   },
-  passingMarks: {
+  mcqFullMarks: {
     type: Number,
-    default: 33,
-    min: 0,
-    max: 100
+    default: 0
   },
-  totalMarks: {
+  passMarks: {
     type: Number,
-    default: 100,
-    min: 0
+    default: 33
+  },
+  // ==============================
+  description: {
+    type: String
   },
   isActive: {
     type: Boolean,
     default: true
   },
-  createdBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+  order: {
+    type: Number,
+    default: 0
   }
 }, {
   timestamps: true
 });
 
-// Index for faster searches
-subjectSchema.index({ name: 1, code: 1 });
-subjectSchema.index({ department: 1, isActive: 1 });
+subjectSchema.index({ class: 1, isActive: 1 });
 
 module.exports = mongoose.model('Subject', subjectSchema);
