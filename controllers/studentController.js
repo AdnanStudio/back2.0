@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Student = require('../models/Student');
+const { cloudinary } = require('../config/cloudinary');
 
 // @desc    Create new student
 // @route   POST /api/students
@@ -42,13 +43,16 @@ exports.createStudent = async (req, res) => {
       });
     }
 
-    // Profile image (যদি upload করা হয়)
+    // ✅ Cloudinary image handling (matching governing-body pattern)
     let profileImage = 'https://via.placeholder.com/150';
+    let profileImagePublicId = null;
+
     if (req.file) {
-      profileImage = req.file.path;
+      profileImage = req.file.path;           // Cloudinary secure URL
+      profileImagePublicId = req.file.filename; // Cloudinary public_id
     }
 
-    // User account তৈরি করা
+    // Create User account
     const user = await User.create({
       name,
       email,
@@ -57,10 +61,11 @@ exports.createStudent = async (req, res) => {
       phone,
       address,
       dateOfBirth,
-      profileImage
+      profileImage,
+      profileImagePublicId
     });
 
-    // Student record তৈরি করা
+    // Create Student record
     const student = await Student.create({
       userId: user._id,
       studentId,
@@ -96,7 +101,6 @@ exports.createStudent = async (req, res) => {
 // @access  Private (Student)
 exports.getStudentProfile = async (req, res) => {
   try {
-    // req.user._id আসে আপনার auth middleware থেকে
     const student = await Student.findOne({ userId: req.user._id })
       .populate('userId', 'name email phone profileImage')
       .populate('class');
@@ -130,12 +134,10 @@ exports.getAllStudents = async (req, res) => {
 
     let query = {};
 
-    // Class filter
     if (studentClass) {
       query.class = studentClass;
     }
 
-    // Section filter
     if (section) {
       query.section = section;
     }
@@ -144,10 +146,9 @@ exports.getAllStudents = async (req, res) => {
       .populate('userId', 'name email phone address profileImage dateOfBirth isActive')
       .sort({ rollNumber: 1 });
 
-    // Search filter (name বা studentId দিয়ে)
     let filteredStudents = students;
     if (search) {
-      filteredStudents = students.filter(student => 
+      filteredStudents = students.filter(student =>
         student.userId.name.toLowerCase().includes(search.toLowerCase()) ||
         student.studentId.toLowerCase().includes(search.toLowerCase())
       );
@@ -232,8 +233,21 @@ exports.updateStudent = async (req, res) => {
       dateOfBirth
     };
 
+    // ✅ Cloudinary image update: delete old → upload new (matching governing-body pattern)
     if (req.file) {
-      userUpdateData.profileImage = req.file.path;
+      const currentUser = await User.findById(student.userId);
+
+      // Delete old image from Cloudinary using stored publicId
+      if (currentUser?.profileImagePublicId) {
+        try {
+          await cloudinary.uploader.destroy(currentUser.profileImagePublicId);
+        } catch (err) {
+          console.error('Failed to delete old student image from Cloudinary:', err);
+        }
+      }
+
+      userUpdateData.profileImage = req.file.path;           // New Cloudinary URL
+      userUpdateData.profileImagePublicId = req.file.filename; // New Cloudinary public_id
     }
 
     await User.findByIdAndUpdate(student.userId, userUpdateData);
@@ -254,7 +268,7 @@ exports.updateStudent = async (req, res) => {
       req.params.id,
       studentUpdateData,
       { new: true, runValidators: true }
-    ).populate('userId');
+    ).populate('userId', 'name email phone address profileImage dateOfBirth isActive');
 
     res.status(200).json({
       success: true,
@@ -284,7 +298,17 @@ exports.deleteStudent = async (req, res) => {
       });
     }
 
-    // User account এবং student record উভয়ই delete করা
+    // ✅ Delete image from Cloudinary before deleting user
+    const user = await User.findById(student.userId);
+    if (user?.profileImagePublicId) {
+      try {
+        await cloudinary.uploader.destroy(user.profileImagePublicId);
+      } catch (err) {
+        console.error('Failed to delete student image from Cloudinary:', err);
+      }
+    }
+
+    // Delete User account and Student record
     await User.findByIdAndDelete(student.userId);
     await Student.findByIdAndDelete(req.params.id);
 

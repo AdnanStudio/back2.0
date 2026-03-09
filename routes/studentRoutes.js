@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const { upload } = require('../config/cloudinary');
+
+// ✅ Use uploadStudentProfile (dedicated Cloudinary storage for students)
+// Folder: school-management/students/{year}/{class}/
+const { uploadStudentProfile } = require('../config/cloudinary');
+
 const {
   createStudent,
   getAllStudents,
@@ -9,17 +13,20 @@ const {
   deleteStudent,
   getStudentsByClass,
   toggleStudentStatus,
-  getStudentProfile // <-- নিশ্চিত হও controller এ ফাংশন আছে
+  getStudentProfile
 } = require('../controllers/studentController');
 const { protect, authorize } = require('../middleware/auth');
 
 // All routes are protected
 router.use(protect);
 
+// Student own profile (must be before /:id)
+router.get('/profile', authorize('student'), getStudentProfile);
+
 // Admin and Teacher can create, view students
 router.route('/')
   .get(getAllStudents)
-  .post(authorize('admin', 'teacher'), upload.single('profileImage'), createStudent);
+  .post(authorize('admin', 'teacher'), uploadStudentProfile.single('profileImage'), createStudent);
 
 // Get students by class
 router.get('/class/:className/:section', getStudentsByClass);
@@ -27,50 +34,10 @@ router.get('/class/:className/:section', getStudentsByClass);
 // Single student operations
 router.route('/:id')
   .get(getStudent)
-  .put(authorize('admin', 'teacher'), upload.single('profileImage'), updateStudent)
+  .put(authorize('admin', 'teacher'), uploadStudentProfile.single('profileImage'), updateStudent)
   .delete(authorize('admin'), deleteStudent);
 
 // Toggle student status (activate/deactivate)
 router.put('/:id/status', authorize('admin'), toggleStudentStatus);
 
-// Student own profile
-router.get('/profile', authorize('student'), getStudentProfile);
-
 module.exports = router;
-
-
-// const express = require('express');
-// const router = express.Router();
-// const { upload } = require('../config/cloudinary');
-// const {
-//   createStudent,
-//   getAllStudents,
-//   getStudent,
-//   updateStudent,
-//   deleteStudent,
-//   getStudentsByClass,
-//   toggleStudentStatus
-// } = require('../controllers/studentController');
-// const { protect, authorize } = require('../middleware/auth');
-
-// // All routes are protected
-// router.use(protect);
-
-// // Admin and Teacher can create, view students
-// router.route('/')
-//   .get(getAllStudents)
-//   .post(authorize('admin', 'teacher'), upload.single('profileImage'), createStudent);
-
-// // Get students by class
-// router.get('/class/:className/:section', getStudentsByClass);
-
-// // Single student operations
-// router.route('/:id')
-//   .get(getStudent)
-//   .put(authorize('admin', 'teacher'), upload.single('profileImage'), updateStudent)
-//   .delete(authorize('admin'), deleteStudent);
-
-// // Toggle student status (activate/deactivate)
-// router.put('/:id/status', authorize('admin'), toggleStudentStatus);
-
-// module.exports = router;

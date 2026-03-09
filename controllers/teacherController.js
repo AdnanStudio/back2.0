@@ -22,7 +22,7 @@ exports.createTeacher = async (req, res) => {
       sections,
       qualification,
       experience,
-      salary,
+      salaryGrade,   // ✅ Grade-1 to Grade-20 or others
       classTeacher
     } = req.body;
 
@@ -44,10 +44,13 @@ exports.createTeacher = async (req, res) => {
       });
     }
 
-    // Upload profile image to Cloudinary
+    // ✅ Cloudinary image handling (matching governing-body/teacher-list pattern)
     let profileImage = 'https://via.placeholder.com/150';
+    let profileImagePublicId = null;
+
     if (req.file) {
-      profileImage = req.file.path; // Cloudinary URL
+      profileImage = req.file.path;           // Cloudinary secure URL
+      profileImagePublicId = req.file.filename; // Cloudinary public_id
     }
 
     // Create user account
@@ -59,16 +62,17 @@ exports.createTeacher = async (req, res) => {
       phone,
       address,
       dateOfBirth,
-      profileImage
+      profileImage,
+      profileImagePublicId
     });
 
     // Parse subjects, classes, sections
-    const subjectArray = Array.isArray(subjects) ? subjects : 
-                        subjects ? JSON.parse(subjects) : [];
-    const classArray = Array.isArray(classes) ? classes : 
-                      classes ? JSON.parse(classes) : [];
-    const sectionArray = Array.isArray(sections) ? sections : 
-                        sections ? JSON.parse(sections) : [];
+    const subjectArray = Array.isArray(subjects) ?
+      subjects : subjects ? JSON.parse(subjects) : [];
+    const classArray = Array.isArray(classes) ?
+      classes : classes ? JSON.parse(classes) : [];
+    const sectionArray = Array.isArray(sections) ?
+      sections : sections ? JSON.parse(sections) : [];
 
     // Create teacher record
     const teacher = await Teacher.create({
@@ -79,7 +83,7 @@ exports.createTeacher = async (req, res) => {
       sections: sectionArray,
       qualification,
       experience: experience || 0,
-      salary,
+      salaryGrade: salaryGrade || null,  // ✅
       classTeacher: classTeacher ? JSON.parse(classTeacher) : undefined
     });
 
@@ -113,7 +117,6 @@ exports.getAllTeachers = async (req, res) => {
 
     let query = {};
 
-    // Subject filter
     if (subject) {
       query.subjects = subject;
     }
@@ -200,7 +203,7 @@ exports.updateTeacher = async (req, res) => {
       sections,
       qualification,
       experience,
-      salary,
+      salaryGrade,   // ✅ Grade-1 to Grade-20 or others
       classTeacher
     } = req.body;
 
@@ -221,26 +224,32 @@ exports.updateTeacher = async (req, res) => {
       dateOfBirth
     };
 
-    // Upload new image if provided
+    // ✅ Cloudinary image update: delete old → upload new (matching governing-body/teacher-list pattern)
     if (req.file) {
-      // Delete old image from Cloudinary
-      const user = await User.findById(teacher.userId);
-      if (user.profileImage && !user.profileImage.includes('placeholder')) {
-        const publicId = user.profileImage.split('/').pop().split('.')[0];
-        await cloudinary.uploader.destroy(`school-management/users/${publicId}`);
+      const currentUser = await User.findById(teacher.userId);
+
+      // Delete old image from Cloudinary using stored publicId
+      if (currentUser?.profileImagePublicId) {
+        try {
+          await cloudinary.uploader.destroy(currentUser.profileImagePublicId);
+        } catch (err) {
+          console.error('Failed to delete old teacher image from Cloudinary:', err);
+        }
       }
-      userUpdateData.profileImage = req.file.path;
+
+      userUpdateData.profileImage = req.file.path;           // New Cloudinary URL
+      userUpdateData.profileImagePublicId = req.file.filename; // New Cloudinary public_id
     }
 
     await User.findByIdAndUpdate(teacher.userId, userUpdateData);
 
     // Parse arrays
-    const subjectArray = Array.isArray(subjects) ? subjects : 
-                        subjects ? JSON.parse(subjects) : teacher.subjects;
-    const classArray = Array.isArray(classes) ? classes : 
-                      classes ? JSON.parse(classes) : teacher.classes;
-    const sectionArray = Array.isArray(sections) ? sections : 
-                        sections ? JSON.parse(sections) : teacher.sections;
+    const subjectArray = Array.isArray(subjects) ?
+      subjects : subjects ? JSON.parse(subjects) : teacher.subjects;
+    const classArray = Array.isArray(classes) ?
+      classes : classes ? JSON.parse(classes) : teacher.classes;
+    const sectionArray = Array.isArray(sections) ?
+      sections : sections ? JSON.parse(sections) : teacher.sections;
 
     // Update teacher data
     const teacherUpdateData = {
@@ -249,7 +258,7 @@ exports.updateTeacher = async (req, res) => {
       sections: sectionArray,
       qualification,
       experience,
-      salary,
+      salaryGrade: salaryGrade || teacher.salaryGrade,  // ✅
       classTeacher: classTeacher ? JSON.parse(classTeacher) : teacher.classTeacher
     };
 
@@ -258,7 +267,7 @@ exports.updateTeacher = async (req, res) => {
       teacherUpdateData,
       { new: true, runValidators: true }
     )
-      .populate('userId')
+      .populate('userId', 'name email phone address profileImage dateOfBirth isActive')
       .populate('subjects', 'name code')
       .populate('classes', 'name section');
 
@@ -291,11 +300,14 @@ exports.deleteTeacher = async (req, res) => {
       });
     }
 
-    // Delete image from Cloudinary
+    // ✅ Delete image from Cloudinary using stored publicId
     const user = await User.findById(teacher.userId);
-    if (user.profileImage && !user.profileImage.includes('placeholder')) {
-      const publicId = user.profileImage.split('/').pop().split('.')[0];
-      await cloudinary.uploader.destroy(`school-management/users/${publicId}`);
+    if (user?.profileImagePublicId) {
+      try {
+        await cloudinary.uploader.destroy(user.profileImagePublicId);
+      } catch (err) {
+        console.error('Failed to delete teacher image from Cloudinary:', err);
+      }
     }
 
     await User.findByIdAndDelete(teacher.userId);

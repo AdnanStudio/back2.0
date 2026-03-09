@@ -1,3 +1,6 @@
+// ============================================
+// FILE PATH: backend/models/Student.js
+// ============================================
 const mongoose = require('mongoose');
 
 const studentSchema = new mongoose.Schema({
@@ -23,6 +26,11 @@ const studentSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
+  // ✅ Session যোগ করা হয়েছে (যেমন: 2024-2025)
+  session: {
+    type: String,
+    default: ''
+  },
   guardianName: {
     type: String,
     required: true
@@ -40,7 +48,7 @@ const studentSchema = new mongoose.Schema({
   },
   bloodGroup: {
     type: String,
-    enum: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']
+    enum: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-', '']
   },
   previousSchool: {
     type: String
