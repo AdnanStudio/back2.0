@@ -1,146 +1,156 @@
+// ============================================================
+// FIXED: models/Mark.js (pre-save middleware corrected)
+// ============================================================
 const mongoose = require('mongoose');
 
-// ── Grade helper ──────────────────────────────────────────────────────────
-const gradeFromPct = (pct) => {
-  if (pct >= 80) return { grade: 'A+', gradePoint: 5.0 };
-  if (pct >= 70) return { grade: 'A',  gradePoint: 4.0 };
-  if (pct >= 60) return { grade: 'A-', gradePoint: 3.5 };
-  if (pct >= 50) return { grade: 'B',  gradePoint: 3.0 };
-  if (pct >= 40) return { grade: 'C',  gradePoint: 2.0 };
-  if (pct >= 33) return { grade: 'D',  gradePoint: 1.0 };
-  return            { grade: 'F',  gradePoint: 0.0 };
-};
+function computeGrade(obtained, fullMarks, passMarks) {
+  const fm = Number(fullMarks) || 100;
+  const pm = Number(passMarks) || 33;
 
-// ── Sub-schema for each subject's marks ──────────────────────────────────
-const subjectMarkSchema = new mongoose.Schema({
-  subjectName:        { type: String, default: '' },
-  subjectCode:        { type: String, default: '' },
-  theoryFullMarks:    { type: Number, default: 100 },
-  theoryObtained:     { type: Number, default: 0 },
-  practicalFullMarks: { type: Number, default: 0 },
-  practicalObtained:  { type: Number, default: 0 },
-  mcqFullMarks:       { type: Number, default: 0 },
-  mcqObtained:        { type: Number, default: 0 },
-  totalFullMarks:     { type: Number, default: 100 },
-  totalObtained:      { type: Number, default: 0 },
-  grade:              { type: String, default: '' },
-  gradePoint:         { type: Number, default: 0 },
-  isAbsent:           { type: Boolean, default: false },
-  remarks:            { type: String, default: '' },
+  if (obtained === null || obtained === undefined || obtained === '') {
+    return { grade: '—', gradePoint: 0, status: 'absent' };
+  }
+
+  const obt = Number(obtained);
+  if (isNaN(obt)) {
+    return { grade: '—', gradePoint: 0, status: 'absent' };
+  }
+  if (obt < pm) {
+    return { grade: 'F', gradePoint: 0, status: 'fail' };
+  }
+
+  const pct = (obt / fm) * 100;
+  if (pct >= 80) return { grade: 'A+', gradePoint: 5.0, status: 'pass' };
+  if (pct >= 70) return { grade: 'A',  gradePoint: 4.0, status: 'pass' };
+  if (pct >= 60) return { grade: 'A-', gradePoint: 3.5, status: 'pass' };
+  if (pct >= 50) return { grade: 'B',  gradePoint: 3.0, status: 'pass' };
+  if (pct >= 40) return { grade: 'C',  gradePoint: 2.0, status: 'pass' };
+  return             { grade: 'D',  gradePoint: 1.0, status: 'pass' };
+}
+
+const SubjectMarkSchema = new mongoose.Schema({
+  code         : { type: String,  default: '' },
+  name         : { type: String,  default: '' },
+  fullMarks    : { type: Number,  default: 100 },
+  passMarks    : { type: Number,  default: 33  },
+  marksObtained: { type: Number,  default: null },
+  grade        : { type: String,  default: '—' },
+  gradePoint   : { type: Number,  default: 0   },
+  status       : {
+    type   : String,
+    enum   : ['pass', 'fail', 'absent', 'pending'],
+    default: 'pending',
+  },
 }, { _id: false });
 
-// ── Main Mark schema ──────────────────────────────────────────────────────
-const markSchema = new mongoose.Schema({
-  student: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Student',
+const MarkSchema = new mongoose.Schema({
+  student   : {
+    type    : mongoose.Schema.Types.ObjectId,
+    ref     : 'Student',
     required: true,
   },
-  class: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Class',
-    required: true,
+  examName  : { type: String, required: true, trim: true },
+  examYear  : { type: String, default: '' },
+  session   : { type: String, default: '' },
+  program   : {
+    type   : String,
+    enum   : ['HSC', 'Degree', 'Honours', 'Other'],
+    default: 'Degree',
   },
-  examType: {
-    type: String,
-    enum: ['1st_term', '2nd_term', '3rd_term', 'half_yearly', 'annual', 'test', 'mock'],
-    required: true,
-  },
-  examYear: {
-    type: Number,
-    required: true,
-    default: () => new Date().getFullYear(),
-  },
+  className : { type: String, default: '' },
+  section   : { type: String, default: '' },
+  subjects  : { type: [SubjectMarkSchema], default: [] },
 
-  subjects:       { type: [subjectMarkSchema], default: [] },
-
-  // Auto-calculated summary
-  totalObtained:  { type: Number, default: 0 },
-  totalFullMarks: { type: Number, default: 0 },
-  percentage:     { type: Number, default: 0 },
-  gpa:            { type: Number, default: 0 },
-  grade:          { type: String, default: '' },
-  position:       { type: Number, default: 0 },
-
-  result: {
-    type: String,
-    enum: ['Pass', 'Fail', 'Not Published'],
-    default: 'Not Published',
+  totalObtained: { type: Number, default: 0 },
+  totalFull    : { type: Number, default: 0 },
+  percentage   : { type: Number, default: 0 },
+  gpa          : { type: Number, default: 0 },
+  result       : {
+    type   : String,
+    enum   : ['PASS', 'FAIL', 'INCOMPLETE', 'NOT ENTERED'],
+    default: 'NOT ENTERED',
   },
-  isPublished: { type: Boolean, default: false },
-  publishedAt: { type: Date },
+  division: { type: String, default: '—' },
+
+  isPublished : { type: Boolean, default: false },
+  publishedAt : { type: Date,    default: null  },
+  remarks     : { type: String,  default: ''    },
 
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
 }, { timestamps: true });
 
-// Unique: one record per student per class per exam per year
-markSchema.index({ student: 1, class: 1, examType: 1, examYear: 1 }, { unique: true });
-markSchema.index({ class: 1, examType: 1, examYear: 1 });
-markSchema.index({ isPublished: 1 });
-
-// ── Pre-save: auto-calculate grades & totals ──────────────────────────────
-markSchema.pre('save', function (next) {
+MarkSchema.pre('save', async function () {
   try {
-    let totalObtained = 0;
-    let totalFullMarks = 0;
-    let gpSum = 0;
-    let hasFailed = false;
-
-    this.subjects.forEach(sub => {
-      const full = ((sub.theoryFullMarks || 0) +
-                   (sub.practicalFullMarks || 0) +
-                   (sub.mcqFullMarks || 0)) || 100;
-
-      if (sub.isAbsent) {
-        sub.totalFullMarks = full;
-        sub.totalObtained  = 0;
-        sub.grade          = 'F';
-        sub.gradePoint     = 0;
-        hasFailed          = true;
-        totalFullMarks    += full;
-        // gpSum += 0 (absent = 0 grade points)
-      } else {
-        const obtained = (parseFloat(sub.theoryObtained)    || 0)
-                       + (parseFloat(sub.practicalObtained)  || 0)
-                       + (parseFloat(sub.mcqObtained)        || 0);
-
-        sub.totalObtained  = obtained;
-        sub.totalFullMarks = full;
-
-        const pct                = full > 0 ? (obtained / full) * 100 : 0;
-        const { grade, gradePoint } = gradeFromPct(pct);
-        sub.grade      = grade;
-        sub.gradePoint = gradePoint;
-
-        if (grade === 'F') hasFailed = true;
-        totalObtained  += obtained;
-        totalFullMarks += full;
-        gpSum          += gradePoint;
-      }
-    });
-
-    this.totalObtained  = totalObtained;
-    this.totalFullMarks = totalFullMarks;
-    this.percentage     = totalFullMarks > 0
-      ? parseFloat(((totalObtained / totalFullMarks) * 100).toFixed(2))
-      : 0;
-
-    const { grade } = gradeFromPct(this.percentage);
-    this.grade = grade;
-
-    this.gpa = this.subjects.length > 0
-      ? parseFloat((gpSum / this.subjects.length).toFixed(2))
-      : 0;
-
-    if (this.isPublished) {
-      this.result = hasFailed ? 'Fail' : 'Pass';
+    if (!Array.isArray(this.subjects) || this.subjects.length === 0) {
+      this.totalObtained = 0;
+      this.totalFull     = 0;
+      this.percentage    = 0;
+      this.gpa           = 0;
+      this.result        = 'NOT ENTERED';
+      this.division      = '—';
+      return;
     }
 
-    next();
+    let totalObt = 0, totalFull = 0, totalGP = 0;
+    let count = 0, hasFail = false;
+
+    for (const sub of this.subjects) {
+      const { grade, gradePoint, status } = computeGrade(
+        sub.marksObtained, sub.fullMarks, sub.passMarks
+      );
+
+      sub.grade      = grade;
+      sub.gradePoint = gradePoint;
+      sub.status     = status;
+
+      if (sub.marksObtained !== null && sub.marksObtained !== undefined) {
+        totalObt  += Number(sub.marksObtained) || 0;
+        totalFull += Number(sub.fullMarks)      || 100;
+        totalGP   += gradePoint;
+        count++;
+        if (status === 'fail') hasFail = true;
+      }
+    }
+
+    this.totalObtained = totalObt;
+    this.totalFull     = totalFull;
+    this.percentage    = totalFull > 0
+      ? parseFloat(((totalObt / totalFull) * 100).toFixed(2))
+      : 0;
+
+    this.gpa = count > 0
+      ? parseFloat((totalGP / count).toFixed(2))
+      : 0;
+
+    if (count === 0) {
+      this.result = 'NOT ENTERED';
+    } else if (hasFail) {
+      this.result = 'FAIL';
+    } else if (count < this.subjects.length) {
+      this.result = 'INCOMPLETE';
+    } else {
+      this.result = 'PASS';
+    }
+
+    if (!hasFail && count > 0) {
+      const g = this.gpa;
+      this.division = g >= 4.5 ? 'First Division (Distinction)'
+                    : g >= 3.5 ? 'First Division'
+                    : g >= 2.5 ? 'Second Division'
+                    : 'Third Division';
+    } else {
+      this.division = '—';
+    }
+
   } catch (err) {
-    next(err);
+    console.error('[Mark pre-save error]', err.message);
+    throw err;
   }
 });
 
-module.exports = mongoose.model('Mark', markSchema);
+const Mark = mongoose.model('Mark', MarkSchema);
+Mark.computeGrade = computeGrade;
+
+module.exports = Mark;
