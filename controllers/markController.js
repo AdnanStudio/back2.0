@@ -1,4 +1,3 @@
-// ============================================================
 // FILE PATH: controllers/markController.js
 //
 // IMPORTANT NOTES about the Student schema:
