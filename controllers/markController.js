@@ -1,17 +1,11 @@
 // FILE PATH: controllers/markController.js
-//
-// IMPORTANT NOTES about the Student schema:
-//   - Student.class    → String  (NOT ObjectId, do NOT populate)
-//   - Student.userId   → ObjectId → ref: 'User'
-//   - Student.rollNumber → Number
-//   - Student.section  → String
+// Full CQ / MCQ / Practical  •  Paper1 + Paper2 or Single
 // ============================================================
 const mongoose = require('mongoose');
 const Mark    = require('../models/Mark');
 const Student = require('../models/Student');
 
-// ── Helpers ───────────────────────────────────────────────────
-const ok = (res, data, msg = 'Success', status = 200) =>
+const ok   = (res, data, msg = 'Success', status = 200) =>
   res.status(status).json({ success: true, message: msg, ...data });
 
 const fail = (res, status, msg, err = null) => {
@@ -20,32 +14,82 @@ const fail = (res, status, msg, err = null) => {
 };
 
 const isValidId = id => id && mongoose.Types.ObjectId.isValid(id);
+const num       = v  => (v === null || v === undefined || v === '') ? null : Number(v);
 
-// ── Sanitize subjects array from request body ─────────────────
+// ─────────────────────────────────────────────────────────────
+//  sanitizeSubjects — maps frontend payload → clean schema obj
+// ─────────────────────────────────────────────────────────────
 const sanitizeSubjects = (subjects = []) =>
-  subjects.map(sub => ({
-    code         : String(sub.code  || '').trim(),
-    name         : String(sub.name  || '').trim(),
-    fullMarks    : Number(sub.fullMarks) || 100,
-    passMarks    : Number(sub.passMarks) || 33,
-    // Must be a Number or null — never undefined or empty string
-    marksObtained: (sub.marksObtained !== null &&
-                    sub.marksObtained !== undefined &&
-                    sub.marksObtained !== '')
-      ? Number(sub.marksObtained)
-      : null,
-  }));
+  subjects.map(s => {
+    const isPair = Boolean(s.isPair);
+    const type   = ['science','arts','custom'].includes(s.subjectType) ? s.subjectType : 'arts';
 
-// ── Populate helper: Student → User (NO populate on 'class') ──
-// Student.class is a plain String, NOT an ObjectId reference.
-const populateStudent = (query) =>
-  query.populate({
+    // Defaults per type
+    const defCQ   = type === 'science' ? 50 : 70;
+    const defMCQ  = type === 'science' ? 25 : 30;
+    const defPrac = 25;
+
+    const cqFM  = Number(s.cqFM)  || defCQ;
+    const mcqFM = Number(s.mcqFM) || defMCQ;
+    const pracFM= Number(s.practicalFM) || defPrac;
+
+    // Auto-calc pass marks if not provided
+    const papers = isPair ? 2 : 1;
+    const cqPM   = Number(s.cqPM)        || Math.ceil(cqFM   * papers * 0.33);
+    const mcqPM  = Number(s.mcqPM)       || Math.ceil(mcqFM  * papers * 0.33);
+    const pracPM = Number(s.practicalPM) || Math.ceil(pracFM * papers * 0.33);
+
+    return {
+      code        : String(s.code || '').trim(),
+      name        : String(s.name || '').trim(),
+      subjectType : type,
+      isPair,
+
+      cqFM,  cqPM,
+      cqP1  : num(s.cqP1),
+      cqP2  : isPair ? num(s.cqP2) : null,
+
+      hasMCQ : Boolean(s.hasMCQ),
+      mcqFM, mcqPM,
+      mcqP1  : s.hasMCQ ? num(s.mcqP1) : null,
+      mcqP2  : s.hasMCQ && isPair ? num(s.mcqP2) : null,
+
+      hasPractical  : Boolean(s.hasPractical),
+      practicalFM: pracFM, practicalPM: pracPM,
+      practicalP1: s.hasPractical ? num(s.practicalP1) : null,
+      practicalP2: s.hasPractical && isPair ? num(s.practicalP2) : null,
+    };
+  });
+
+// ── Validate no obtained > full marks ─────────────────────────
+const validateSubjects = (subs) => {
+  for (const s of subs) {
+    if (s.cqP1 != null && s.cqP1 > s.cqFM)
+      return `"${s.name}" CQ Paper 1 (${s.cqP1}) > full marks (${s.cqFM})`;
+    if (s.isPair && s.cqP2 != null && s.cqP2 > s.cqFM)
+      return `"${s.name}" CQ Paper 2 (${s.cqP2}) > full marks (${s.cqFM})`;
+    if (s.hasMCQ) {
+      if (s.mcqP1 != null && s.mcqP1 > s.mcqFM)
+        return `"${s.name}" MCQ Paper 1 (${s.mcqP1}) > full marks (${s.mcqFM})`;
+      if (s.isPair && s.mcqP2 != null && s.mcqP2 > s.mcqFM)
+        return `"${s.name}" MCQ Paper 2 (${s.mcqP2}) > full marks (${s.mcqFM})`;
+    }
+    if (s.hasPractical) {
+      if (s.practicalP1 != null && s.practicalP1 > s.practicalFM)
+        return `"${s.name}" Practical Paper 1 (${s.practicalP1}) > full marks (${s.practicalFM})`;
+      if (s.isPair && s.practicalP2 != null && s.practicalP2 > s.practicalFM)
+        return `"${s.name}" Practical Paper 2 (${s.practicalP2}) > full marks (${s.practicalFM})`;
+    }
+  }
+  return null;
+};
+
+// ── Populate helper (Student.class is a String — NOT populated) ──
+const populateStudent = q =>
+  q.populate({
     path   : 'student',
     select : 'studentId rollNumber section class userId session',
-    populate: {
-      path  : 'userId',
-      select: 'name email profileImage',
-    },
+    populate: { path: 'userId', select: 'name email profileImage' },
   });
 
 // ═══════════════════════════════════════════════════════════════
@@ -54,30 +98,22 @@ const populateStudent = (query) =>
 exports.saveMarks = async (req, res) => {
   try {
     const {
-      studentId,
-      examName,
-      examYear    = '',
-      session     = '',
-      program     = 'Degree',
-      className   = '',
-      section     = '',
-      subjects    = [],
-      isPublished = false,
-      remarks     = '',
+      studentId, examName, examYear = '', session = '',
+      program = 'Degree', className = '', section = '',
+      subjects = [], isPublished = false, remarks = '',
     } = req.body;
 
-    // ── Validate ────────────────────────────────────────────────
-    if (!studentId)         return fail(res, 400, 'studentId is required');
-    if (!examName?.trim())  return fail(res, 400, 'examName is required');
+    if (!studentId)            return fail(res, 400, 'studentId is required');
+    if (!examName?.trim())     return fail(res, 400, 'examName is required');
     if (!isValidId(studentId)) return fail(res, 400, 'studentId is not a valid ObjectId');
 
-    // ── Check student exists ─────────────────────────────────────
     const student = await Student.findById(studentId).select('_id');
-    if (!student) return fail(res, 404, `No student found with id: ${studentId}`);
+    if (!student) return fail(res, 404, `No student found: ${studentId}`);
 
-    const cleanSubjects = sanitizeSubjects(subjects);
+    const clean = sanitizeSubjects(subjects);
+    const valErr = validateSubjects(clean);
+    if (valErr) return fail(res, 400, valErr);
 
-    // ── Try to find existing record ──────────────────────────────
     const filter = {
       student : studentId,
       examName: examName.trim(),
@@ -87,179 +123,139 @@ exports.saveMarks = async (req, res) => {
     let mark = await Mark.findOne(filter);
 
     if (mark) {
-      // ── Update existing ────────────────────────────────────────
-      mark.examYear   = examYear;
-      mark.program    = program;
-      mark.className  = (className || '').trim();
-      mark.section    = (section   || '').trim();
-      mark.subjects   = cleanSubjects;
-      mark.remarks    = (remarks   || '').trim();
-      mark.updatedBy  = req.user?._id || null;
-
+      mark.examYear  = examYear;
+      mark.program   = program;
+      mark.className = (className || '').trim();
+      mark.section   = (section   || '').trim();
+      mark.subjects  = clean;
+      mark.remarks   = (remarks   || '').trim();
+      mark.updatedBy = req.user?._id || null;
       if (isPublished !== undefined) {
         mark.isPublished = Boolean(isPublished);
-        if (mark.isPublished && !mark.publishedAt) {
-          mark.publishedAt = new Date();
-        }
+        if (mark.isPublished && !mark.publishedAt) mark.publishedAt = new Date();
       }
     } else {
-      // ── Create new ─────────────────────────────────────────────
       mark = new Mark({
-        student    : studentId,
-        examName   : examName.trim(),
-        examYear   : examYear,
-        session    : (session || '').trim(),
-        program    : program,
-        className  : (className || '').trim(),
-        section    : (section   || '').trim(),
-        subjects   : cleanSubjects,
-        remarks    : (remarks   || '').trim(),
+        student: studentId, examName: examName.trim(),
+        examYear, session: (session || '').trim(), program,
+        className: (className || '').trim(), section: (section || '').trim(),
+        subjects: clean, remarks: (remarks || '').trim(),
         isPublished: false,
-        createdBy  : req.user?._id || null,
-        updatedBy  : req.user?._id || null,
+        createdBy: req.user?._id, updatedBy: req.user?._id,
       });
     }
 
-    // pre-save hook will compute grades, GPA, result, division
-    await mark.save();
-
-    // Fetch populated result for response
-    const saved = await populateStudent(
-      Mark.findById(mark._id)
-    );
-
+    await mark.save();  // pre-save computes everything
+    const saved = await populateStudent(Mark.findById(mark._id));
     return ok(res, { data: saved }, 'Marks saved successfully');
 
   } catch (err) {
-    // Duplicate key: try find + update
     if (err.code === 11000) {
       try {
         const { studentId, examName, session = '', subjects = [] } = req.body;
-        const existing = await Mark.findOne({
-          student : studentId,
-          examName: String(examName).trim(),
-          session : String(session).trim(),
+        const ex = await Mark.findOne({
+          student: studentId, examName: String(examName).trim(), session: String(session).trim(),
         });
-        if (existing) {
-          existing.subjects  = sanitizeSubjects(subjects);
-          existing.updatedBy = req.user?._id || null;
-          await existing.save();
-          return ok(res, { data: existing }, 'Marks updated (duplicate handled)');
+        if (ex) {
+          ex.subjects  = sanitizeSubjects(subjects);
+          ex.updatedBy = req.user?._id || null;
+          await ex.save();
+          return ok(res, { data: ex }, 'Marks updated (dup handled)');
         }
-      } catch (e2) {
-        return fail(res, 500, 'Upsert failed after duplicate error', e2);
-      }
+      } catch (e2) { return fail(res, 500, 'Upsert failed', e2); }
     }
     return fail(res, 500, 'Failed to save marks', err);
   }
 };
 
 // ═══════════════════════════════════════════════════════════════
-//  GET /api/marks  — list all marks (admin/teacher)
+//  POST /api/marks/bulk
+// ═══════════════════════════════════════════════════════════════
+exports.saveBulkMarks = async (req, res) => {
+  try {
+    const { entries = [] } = req.body;
+    if (!entries.length) return fail(res, 400, 'entries[] required');
+    const results = [];
+    for (const e of entries) {
+      const { studentId, examName, session = '', subjects = [], ...rest } = e;
+      if (!isValidId(studentId)) { results.push({ studentId, error: 'Invalid id' }); continue; }
+      const filter = { student: studentId, examName: String(examName).trim(), session: String(session).trim() };
+      let mark = await Mark.findOne(filter);
+      const clean = sanitizeSubjects(subjects);
+      if (mark) { mark.subjects = clean; mark.updatedBy = req.user?._id; Object.assign(mark, rest); }
+      else       { mark = new Mark({ student: studentId, examName: String(examName).trim(), session: String(session).trim(), subjects: clean, createdBy: req.user?._id, updatedBy: req.user?._id, ...rest }); }
+      await mark.save();
+      results.push({ studentId, markId: mark._id, result: mark.result });
+    }
+    return ok(res, { count: results.length, data: results }, 'Bulk marks saved');
+  } catch (err) { return fail(res, 500, 'Bulk save failed', err); }
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  GET /api/marks
 // ═══════════════════════════════════════════════════════════════
 exports.getAllMarks = async (req, res) => {
   try {
-    const {
-      className, section, program,
-      examName, examYear, session,
-      result, isPublished,
-      search,
-      page  = 1,
-      limit = 30,
-    } = req.query;
-
-    // Build filter
+    const { className, section, program, examName, examYear, session, result, isPublished, search, page = 1, limit = 30 } = req.query;
     const filter = {};
-    if (className)   filter.className = { $regex: className, $options: 'i' };
-    if (section)     filter.section   = section;
-    if (program)     filter.program   = program;
-    if (examName)    filter.examName  = { $regex: examName, $options: 'i' };
-    if (examYear)    filter.examYear  = examYear;
-    if (session)     filter.session   = { $regex: session, $options: 'i' };
-    if (result)      filter.result    = result.toUpperCase();
+    if (className)   filter.className  = { $regex: className,  $options: 'i' };
+    if (section)     filter.section    = section;
+    if (program)     filter.program    = program;
+    if (examName)    filter.examName   = { $regex: examName,   $options: 'i' };
+    if (examYear)    filter.examYear   = examYear;
+    if (session)     filter.session    = { $regex: session,    $options: 'i' };
+    if (result)      filter.result     = result;
     if (isPublished !== undefined && isPublished !== '')
       filter.isPublished = isPublished === 'true';
 
     const skip  = (Math.max(parseInt(page), 1) - 1) * parseInt(limit);
     const total = await Mark.countDocuments(filter);
 
-    let query = Mark.find(filter)
-      .sort({ className: 1, createdAt: -1 })
-      .skip(skip)
-      .limit(Math.min(parseInt(limit), 100));
+    let marks = await populateStudent(
+      Mark.find(filter).sort({ className: 1, createdAt: -1 }).skip(skip).limit(Math.min(parseInt(limit), 100))
+    ).lean();
 
-    // Populate student + user (NOT class — it's a String)
-    query = populateStudent(query);
-
-    let marks = await query.lean();
-
-    // Client-side search filter on student name/roll (if search param provided)
-    if (search && search.trim()) {
+    if (search?.trim()) {
       const q = search.toLowerCase();
       marks = marks.filter(m =>
-        (m.student?.userId?.name     || '').toLowerCase().includes(q) ||
+        (m.student?.userId?.name || '').toLowerCase().includes(q) ||
         String(m.student?.rollNumber || '').includes(q)
       );
     }
-
     return ok(res, { total, count: marks.length, page: parseInt(page), data: marks });
-  } catch (err) {
-    return fail(res, 500, 'Failed to fetch marks', err);
-  }
+  } catch (err) { return fail(res, 500, 'Failed to fetch marks', err); }
 };
 
 // ═══════════════════════════════════════════════════════════════
-//  GET /api/marks/my  — current student's own published results
+//  GET /api/marks/my  — student's own published results
 // ═══════════════════════════════════════════════════════════════
 exports.getMyMarks = async (req, res) => {
   try {
-    // Find Student record linked to the logged-in User
-    const student = await Student
-      .findOne({ userId: req.user._id })
-      .select('_id');
-
-    if (!student) {
-      // User might not be a student — return empty gracefully
-      return ok(res, { count: 0, data: [] }, 'No student profile found');
-    }
-
-    const marks = await Mark.find({
-      student    : student._id,
-      isPublished: true,
-    })
-      .sort({ createdAt: -1 })
-      .lean();
-
+    const student = await Student.findOne({ userId: req.user._id }).select('_id');
+    if (!student) return ok(res, { count: 0, data: [] }, 'No student profile');
+    const marks = await Mark.find({ student: student._id, isPublished: true })
+      .sort({ createdAt: -1 }).lean();
     return ok(res, { count: marks.length, data: marks });
-  } catch (err) {
-    return fail(res, 500, 'Failed to fetch your marks', err);
-  }
+  } catch (err) { return fail(res, 500, 'Failed to fetch marks', err); }
 };
 
 // ═══════════════════════════════════════════════════════════════
-//  GET /api/marks/student/:studentId  — one student (admin)
+//  GET /api/marks/student/:studentId
 // ═══════════════════════════════════════════════════════════════
 exports.getStudentMarks = async (req, res) => {
   try {
     const { studentId } = req.params;
     if (!isValidId(studentId)) return fail(res, 400, 'Invalid studentId');
-
     const filter = { student: studentId };
     if (req.query.examName) filter.examName = { $regex: req.query.examName, $options: 'i' };
     if (req.query.session)  filter.session  = req.query.session;
-
-    const marks = await populateStudent(
-      Mark.find(filter).sort({ createdAt: -1 })
-    ).lean();
-
+    const marks = await populateStudent(Mark.find(filter).sort({ createdAt: -1 })).lean();
     return ok(res, { count: marks.length, data: marks });
-  } catch (err) {
-    return fail(res, 500, 'Failed to fetch student marks', err);
-  }
+  } catch (err) { return fail(res, 500, 'Failed to fetch student marks', err); }
 };
 
 // ═══════════════════════════════════════════════════════════════
-//  GET /api/marks/stats  — class summary statistics
+//  GET /api/marks/stats
 // ═══════════════════════════════════════════════════════════════
 exports.getClassStats = async (req, res) => {
   try {
@@ -271,56 +267,39 @@ exports.getClassStats = async (req, res) => {
     if (session)   filter.session   = { $regex: session,   $options: 'i' };
     if (program)   filter.program   = program;
 
-    const marks = await Mark.find(filter)
-      .select('result gpa percentage isPublished')
-      .lean();
-
-    if (!marks.length) {
-      return ok(res, {
-        data: { total:0, passed:0, failed:0, incomplete:0, published:0, passRate:0, avgGPA:'0.00', avgPct:'0.00' },
-      });
-    }
+    const marks = await Mark.find(filter).select('result gpa percentage isPublished').lean();
+    if (!marks.length) return ok(res, { data: { total:0,passed:0,failed:0,incomplete:0,published:0,passRate:0,avgGPA:'0.00',avgPct:'0.00' } });
 
     const total      = marks.length;
     const passed     = marks.filter(m => m.result === 'PASS').length;
     const failed     = marks.filter(m => m.result === 'FAIL').length;
     const incomplete = marks.filter(m => m.result === 'INCOMPLETE' || m.result === 'NOT ENTERED').length;
     const published  = marks.filter(m => m.isPublished).length;
-    const passRate   = parseFloat(((passed / total) * 100).toFixed(1));
-    const avgGPA     = (marks.reduce((a, m) => a + (m.gpa || 0), 0) / total).toFixed(2);
-    const avgPct     = (marks.reduce((a, m) => a + (m.percentage || 0), 0) / total).toFixed(2);
-
-    return ok(res, { data: { total, passed, failed, incomplete, published, passRate, avgGPA, avgPct } });
-  } catch (err) {
-    return fail(res, 500, 'Failed to get class stats', err);
-  }
+    return ok(res, { data: {
+      total, passed, failed, incomplete, published,
+      passRate : parseFloat(((passed/total)*100).toFixed(1)),
+      avgGPA   : (marks.reduce((a,m)=>a+(m.gpa||0),0)/total).toFixed(2),
+      avgPct   : (marks.reduce((a,m)=>a+(m.percentage||0),0)/total).toFixed(2),
+    }});
+  } catch (err) { return fail(res, 500, 'Failed to get stats', err); }
 };
 
 // ═══════════════════════════════════════════════════════════════
-//  GET /api/marks/exams  — distinct exam list
+//  GET /api/marks/exams
 // ═══════════════════════════════════════════════════════════════
 exports.getExamList = async (req, res) => {
   try {
     const exams = await Mark.aggregate([
-      {
-        $group: {
-          _id    : { examName: '$examName', examYear: '$examYear', program: '$program' },
-          count  : { $sum: 1 },
-          passed : { $sum: { $cond: [{ $eq: ['$result', 'PASS'] }, 1, 0] } },
-          classes: { $addToSet: '$className' },
-        },
-      },
+      { $group: { _id: { examName:'$examName', examYear:'$examYear', program:'$program' }, count:{ $sum:1 }, passed:{ $sum:{ $cond:[{ $eq:['$result','PASS'] },1,0] } }, classes:{ $addToSet:'$className' } } },
       { $sort: { '_id.examYear': -1, '_id.examName': 1 } },
       { $limit: 50 },
     ]);
     return ok(res, { count: exams.length, data: exams });
-  } catch (err) {
-    return fail(res, 500, 'Failed to get exam list', err);
-  }
+  } catch (err) { return fail(res, 500, 'Failed to get exam list', err); }
 };
 
 // ═══════════════════════════════════════════════════════════════
-//  GET /api/marks/:id  — single mark by id
+//  GET /api/marks/:id
 // ═══════════════════════════════════════════════════════════════
 exports.getMarkById = async (req, res) => {
   try {
@@ -328,13 +307,11 @@ exports.getMarkById = async (req, res) => {
     const mark = await populateStudent(Mark.findById(req.params.id));
     if (!mark) return fail(res, 404, 'Mark not found');
     return ok(res, { data: mark });
-  } catch (err) {
-    return fail(res, 500, 'Failed to fetch mark', err);
-  }
+  } catch (err) { return fail(res, 500, 'Failed to fetch mark', err); }
 };
 
 // ═══════════════════════════════════════════════════════════════
-//  PUT /api/marks/:id  — update a mark
+//  PUT /api/marks/:id
 // ═══════════════════════════════════════════════════════════════
 exports.updateMark = async (req, res) => {
   try {
@@ -342,151 +319,53 @@ exports.updateMark = async (req, res) => {
     const mark = await Mark.findById(req.params.id);
     if (!mark) return fail(res, 404, 'Mark not found');
 
-    if (req.body.subjects)   mark.subjects   = sanitizeSubjects(req.body.subjects);
-    if (req.body.examName)   mark.examName   = req.body.examName.trim();
-    if (req.body.examYear)   mark.examYear   = req.body.examYear;
-    if (req.body.session !== undefined) mark.session   = req.body.session;
-    if (req.body.program)    mark.program    = req.body.program;
+    if (req.body.subjects)            mark.subjects  = sanitizeSubjects(req.body.subjects);
+    if (req.body.examName)            mark.examName  = req.body.examName.trim();
+    if (req.body.examYear)            mark.examYear  = req.body.examYear;
+    if (req.body.session  !== undefined) mark.session   = req.body.session;
+    if (req.body.program)             mark.program   = req.body.program;
     if (req.body.className !== undefined) mark.className = req.body.className;
-    if (req.body.section  !== undefined)  mark.section  = req.body.section;
-    if (req.body.remarks  !== undefined)  mark.remarks  = req.body.remarks;
+    if (req.body.section  !== undefined) mark.section   = req.body.section;
+    if (req.body.remarks  !== undefined) mark.remarks   = req.body.remarks;
     if (req.body.isPublished !== undefined) {
       mark.isPublished = Boolean(req.body.isPublished);
       if (mark.isPublished && !mark.publishedAt) mark.publishedAt = new Date();
     }
     mark.updatedBy = req.user?._id || null;
-
     await mark.save();
     return ok(res, { data: mark }, 'Mark updated');
-  } catch (err) {
-    return fail(res, 500, 'Failed to update mark', err);
-  }
+  } catch (err) { return fail(res, 500, 'Failed to update', err); }
 };
 
 // ═══════════════════════════════════════════════════════════════
-//  PATCH /api/marks/:id/publish  — toggle publish
+//  PATCH /api/marks/:id/publish
 // ═══════════════════════════════════════════════════════════════
 exports.togglePublish = async (req, res) => {
   try {
     if (!isValidId(req.params.id)) return fail(res, 400, 'Invalid id');
-
     const mark = await Mark.findById(req.params.id).select('isPublished publishedAt');
-    if (!mark) return fail(res, 404, 'Mark not found');
-
-    const nowPublished = !mark.isPublished;
-
-    // Use updateOne so pre-save doesn't re-run (grades unchanged)
-    await Mark.updateOne(
-      { _id: mark._id },
-      {
-        $set: {
-          isPublished: nowPublished,
-          publishedAt: nowPublished ? new Date() : null,
-          updatedBy  : req.user?._id || null,
-        },
-      }
-    );
-
-    return ok(res, { data: { _id: mark._id, isPublished: nowPublished } },
-      `Result ${nowPublished ? 'published' : 'unpublished'}`);
-  } catch (err) {
-    return fail(res, 500, 'Failed to toggle publish', err);
-  }
+    if (!mark) return fail(res, 404, 'Not found');
+    const nowPub = !mark.isPublished;
+    await Mark.updateOne({ _id: mark._id }, { isPublished: nowPub, publishedAt: nowPub ? new Date() : mark.publishedAt });
+    return ok(res, { isPublished: nowPub }, `Result ${nowPub ? 'published' : 'unpublished'}`);
+  } catch (err) { return fail(res, 500, 'Failed', err); }
 };
 
 // ═══════════════════════════════════════════════════════════════
-//  POST /api/marks/publish-class  — publish all for a class
+//  POST /api/marks/publish-class
 // ═══════════════════════════════════════════════════════════════
 exports.publishClassResults = async (req, res) => {
   try {
-    const { className, section, examName, session, publish = true } = req.body;
-    if (!className || !examName)
-      return fail(res, 400, 'className and examName are required');
-
-    const filter = {
-      className: { $regex: className, $options: 'i' },
-      examName : { $regex: examName,  $options: 'i' },
-    };
-    if (section) filter.section = section;
-    if (session) filter.session = { $regex: session, $options: 'i' };
-
-    const result = await Mark.updateMany(filter, {
-      $set: {
-        isPublished: Boolean(publish),
-        publishedAt: publish ? new Date() : null,
-        updatedBy  : req.user?._id || null,
-      },
-    });
-
-    return ok(res,
-      { count: result.modifiedCount },
-      `${result.modifiedCount} results ${publish ? 'published' : 'unpublished'}`
-    );
-  } catch (err) {
-    return fail(res, 500, 'Failed to publish class results', err);
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════
-//  POST /api/marks/bulk  — bulk save entire class
-// ═══════════════════════════════════════════════════════════════
-exports.saveBulkMarks = async (req, res) => {
-  try {
-    const { marksArray } = req.body;
-    if (!Array.isArray(marksArray) || !marksArray.length)
-      return fail(res, 400, 'marksArray is required');
-
-    let saved = 0, failed = 0;
-    const errors = [];
-
-    for (const item of marksArray) {
-      try {
-        const { studentId, examName, session = '' } = item;
-        if (!studentId || !examName) { failed++; continue; }
-
-        const cleanSubs = sanitizeSubjects(item.subjects || []);
-        let mark = await Mark.findOne({
-          student : studentId,
-          examName: String(examName).trim(),
-          session : String(session).trim(),
-        });
-
-        if (mark) {
-          mark.subjects  = cleanSubs;
-          mark.updatedBy = req.user?._id || null;
-          ['examYear','program','className','section'].forEach(f => {
-            if (item[f] !== undefined) mark[f] = item[f];
-          });
-        } else {
-          mark = new Mark({
-            student  : studentId,
-            examName : String(examName).trim(),
-            examYear : item.examYear  || '',
-            session  : String(session).trim(),
-            program  : item.program   || 'Degree',
-            className: item.className || '',
-            section  : item.section   || '',
-            subjects : cleanSubs,
-            createdBy: req.user?._id  || null,
-            updatedBy: req.user?._id  || null,
-          });
-        }
-
-        await mark.save();
-        saved++;
-      } catch (e) {
-        failed++;
-        errors.push(e.message);
-      }
-    }
-
-    return ok(res,
-      { data: { saved, failed, errors: errors.slice(0, 10) } },
-      `${saved} marks saved, ${failed} failed`
-    );
-  } catch (err) {
-    return fail(res, 500, 'Failed to save bulk marks', err);
-  }
+    const { className, section, examName, session, program } = req.body;
+    const filter = {};
+    if (className) filter.className = { $regex: className, $options: 'i' };
+    if (section)   filter.section   = section;
+    if (examName)  filter.examName  = { $regex: examName,  $options: 'i' };
+    if (session)   filter.session   = session;
+    if (program)   filter.program   = program;
+    const r = await Mark.updateMany(filter, { isPublished: true, $set: { publishedAt: new Date() } });
+    return ok(res, { modifiedCount: r.modifiedCount }, 'Results published');
+  } catch (err) { return fail(res, 500, 'Failed', err); }
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -496,9 +375,7 @@ exports.deleteMark = async (req, res) => {
   try {
     if (!isValidId(req.params.id)) return fail(res, 400, 'Invalid id');
     const mark = await Mark.findByIdAndDelete(req.params.id);
-    if (!mark) return fail(res, 404, 'Mark not found');
-    return ok(res, {}, 'Mark deleted');
-  } catch (err) {
-    return fail(res, 500, 'Failed to delete mark', err);
-  }
+    if (!mark) return fail(res, 404, 'Not found');
+    return ok(res, {}, 'Deleted');
+  } catch (err) { return fail(res, 500, 'Failed', err); }
 };
