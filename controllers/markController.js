@@ -4,6 +4,7 @@
 const mongoose = require('mongoose');
 const Mark    = require('../models/Mark');
 const Student = require('../models/Student');
+const Class   = require('../models/Class');
 
 const ok   = (res, data, msg = 'Success', status = 200) =>
   res.status(status).json({ success: true, message: msg, ...data });
@@ -61,6 +62,63 @@ const sanitizeSubjects = (subjects = []) =>
     };
   });
 
+// ─────────────────────────────────────────────────────────────
+//  convertSimpleSubjects
+//  Marks.js sends { theoryObtained, mcqObtained, practicalObtained, ... }
+//  This converts to the cqP1/mcqP1/practicalP1 format the model expects
+// ─────────────────────────────────────────────────────────────
+const convertSimpleSubjects = (subjects = []) =>
+  subjects.map(s => {
+    const theoryFM   = Number(s.theoryFullMarks)    || 100;
+    const mcqFM      = Number(s.mcqFullMarks)       || 0;
+    const pracFM     = Number(s.practicalFullMarks) || 0;
+    const hasMCQ     = mcqFM > 0;
+    const hasPrac    = pracFM > 0;
+
+    return {
+      code        : String(s.subjectCode || s.code || '').trim(),
+      name        : String(s.subjectName || s.name || '').trim(),
+      subjectType : 'arts',
+      isPair      : false,
+
+      cqFM  : theoryFM,
+      cqPM  : Math.ceil(theoryFM * 0.33),
+      // If absent, cqP1 = null → pre-save hook marks status as 'absent'
+      cqP1  : s.isAbsent ? null : num(s.theoryObtained),
+      cqP2  : null,
+
+      hasMCQ,
+      mcqFM,
+      mcqPM  : hasMCQ ? Math.ceil(mcqFM * 0.33) : 10,
+      mcqP1  : hasMCQ && !s.isAbsent ? num(s.mcqObtained) : null,
+      mcqP2  : null,
+
+      hasPractical  : hasPrac,
+      practicalFM   : pracFM,
+      practicalPM   : hasPrac ? Math.ceil(pracFM * 0.33) : 8,
+      practicalP1   : hasPrac && !s.isAbsent ? num(s.practicalObtained) : null,
+      practicalP2   : null,
+    };
+  });
+
+// ─────────────────────────────────────────────────────────────
+//  convertStoredSubjects
+//  Converts stored cqP1/mcqP1 format → frontend theoryObtained format
+//  Used when returning existing marks to Marks.js
+// ─────────────────────────────────────────────────────────────
+const convertStoredSubjects = (subjects = []) =>
+  subjects.map(s => ({
+    subjectName        : s.name,
+    subjectCode        : s.code,
+    theoryFullMarks    : s.cqFM || 100,
+    theoryObtained     : s.status === 'absent' ? '' : (s.cqP1 ?? ''),
+    mcqFullMarks       : s.hasMCQ ? (s.mcqFM || 30) : 0,
+    mcqObtained        : s.hasMCQ && s.status !== 'absent' ? (s.mcqP1 ?? '') : '',
+    practicalFullMarks : s.hasPractical ? (s.practicalFM || 25) : 0,
+    practicalObtained  : s.hasPractical && s.status !== 'absent' ? (s.practicalP1 ?? '') : '',
+    isAbsent           : s.status === 'absent',
+  }));
+
 // ── Validate no obtained > full marks ─────────────────────────
 const validateSubjects = (subs) => {
   for (const s of subs) {
@@ -91,6 +149,192 @@ const populateStudent = q =>
     select : 'studentId rollNumber section class userId session',
     populate: { path: 'userId', select: 'name email profileImage' },
   });
+
+// ═══════════════════════════════════════════════════════════════
+//  GET /api/marks/class/:classId/students
+//  Returns class info + subjects + students with existing marks
+//  Called by Marks.js loadEntry()
+// ═══════════════════════════════════════════════════════════════
+exports.getClassStudentsForMarks = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const { examType, examYear } = req.query;
+
+    if (!isValidId(classId)) return fail(res, 400, 'Invalid classId');
+
+    const classData = await Class.findById(classId)
+      .populate({
+        path: 'students',
+        populate: { path: 'userId', select: 'name email profileImage' },
+      })
+      .populate({ path: 'subjects.teacher', populate: { path: 'userId', select: 'name' } });
+
+    if (!classData) return fail(res, 404, 'Class not found');
+
+    const examName = String(examType || '').trim();
+    const session  = String(examYear || '').trim();
+
+    // Fetch existing marks for all students in this class
+    const studentIds = classData.students.map(s => s._id);
+    const existingMarks = await Mark.find({
+      student : { $in: studentIds },
+      examName,
+      session,
+    }).lean();
+
+    const markMap = {};
+    existingMarks.forEach(m => { markMap[String(m.student)] = m; });
+
+    const students = classData.students.map(student => {
+      const stored = markMap[String(student._id)];
+      // Convert stored mark subjects back to frontend format
+      const existingMark = stored ? {
+        ...stored,
+        subjects: convertStoredSubjects(stored.subjects || []),
+      } : null;
+
+      return {
+        student: {
+          _id          : student._id,
+          name         : student.userId?.name || '',
+          rollNumber   : student.rollNumber,
+          profileImage : student.userId?.profileImage || '',
+          studentId    : student.studentId,
+          section      : student.section,
+        },
+        existingMark,
+      };
+    });
+
+    // Sort by rollNumber
+    students.sort((a, b) => (a.student.rollNumber || 0) - (b.student.rollNumber || 0));
+
+    return ok(res, {
+      data: {
+        class   : { _id: classData._id, name: classData.name, section: classData.section },
+        subjects: classData.subjects || [],
+        students,
+      },
+    });
+  } catch (err) { return fail(res, 500, 'Failed to load class students', err); }
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  GET /api/marks/class/:classId
+//  Returns all published/unpublished marks for a class
+//  Called by Marks.js loadView()
+// ═══════════════════════════════════════════════════════════════
+exports.getClassMarks = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const { examType, examYear } = req.query;
+
+    if (!isValidId(classId)) return fail(res, 400, 'Invalid classId');
+
+    const classData = await Class.findById(classId).select('students name section');
+    if (!classData) return fail(res, 404, 'Class not found');
+
+    const filter = {
+      student  : { $in: classData.students },
+      examName : String(examType || '').trim(),
+      session  : String(examYear || '').trim(),
+    };
+
+    const marks = await populateStudent(Mark.find(filter).sort({ createdAt: -1 })).lean();
+    return ok(res, { count: marks.length, data: marks });
+  } catch (err) { return fail(res, 500, 'Failed to fetch class marks', err); }
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  GET /api/marks/stats/:classId
+//  Called by Marks.js loadStats()
+// ═══════════════════════════════════════════════════════════════
+exports.getClassStatsByClassId = async (req, res) => {
+  try {
+    const { classId } = req.params;
+    const { examType, examYear } = req.query;
+
+    if (!isValidId(classId)) return fail(res, 400, 'Invalid classId');
+
+    const classData = await Class.findById(classId).select('students');
+    if (!classData) return fail(res, 404, 'Class not found');
+
+    const filter = {
+      student  : { $in: classData.students },
+      examName : String(examType || '').trim(),
+      session  : String(examYear || '').trim(),
+    };
+
+    const marks = await Mark.find(filter).select('result gpa percentage isPublished').lean();
+    if (!marks.length) {
+      return ok(res, { data: { total:0, passed:0, failed:0, incomplete:0, published:0, passRate:0, avgGPA:'0.00', avgPct:'0.00' } });
+    }
+
+    const total      = marks.length;
+    const passed     = marks.filter(m => m.result === 'PASS').length;
+    const failed     = marks.filter(m => m.result === 'FAIL').length;
+    const incomplete = marks.filter(m => m.result === 'INCOMPLETE' || m.result === 'NOT ENTERED').length;
+    const published  = marks.filter(m => m.isPublished).length;
+
+    return ok(res, { data: {
+      total, passed, failed, incomplete, published,
+      passRate : parseFloat(((passed / total) * 100).toFixed(1)),
+      avgGPA   : (marks.reduce((a, m) => a + (m.gpa || 0), 0) / total).toFixed(2),
+      avgPct   : (marks.reduce((a, m) => a + (m.percentage || 0), 0) / total).toFixed(2),
+    }});
+  } catch (err) { return fail(res, 500, 'Failed to get stats', err); }
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  PUT /api/marks/publish
+//  Publish all marks for classId + examType + examYear
+//  Called by Marks.js handlePublish()
+// ═══════════════════════════════════════════════════════════════
+exports.publishClassMarks = async (req, res) => {
+  try {
+    const { classId, examType, examYear } = req.body;
+    if (!isValidId(classId)) return fail(res, 400, 'Invalid classId');
+
+    const classData = await Class.findById(classId).select('students');
+    if (!classData) return fail(res, 404, 'Class not found');
+
+    const filter = {
+      student  : { $in: classData.students },
+      examName : String(examType || '').trim(),
+      session  : String(examYear || '').trim(),
+    };
+
+    const r = await Mark.updateMany(filter, {
+      isPublished: true,
+      publishedAt: new Date(),
+    });
+    return ok(res, { modifiedCount: r.modifiedCount }, `${r.modifiedCount} results published`);
+  } catch (err) { return fail(res, 500, 'Failed to publish', err); }
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  PUT /api/marks/unpublish
+//  Unpublish all marks for classId + examType + examYear
+//  Called by Marks.js handleUnpublish()
+// ═══════════════════════════════════════════════════════════════
+exports.unpublishClassMarks = async (req, res) => {
+  try {
+    const { classId, examType, examYear } = req.body;
+    if (!isValidId(classId)) return fail(res, 400, 'Invalid classId');
+
+    const classData = await Class.findById(classId).select('students');
+    if (!classData) return fail(res, 404, 'Class not found');
+
+    const filter = {
+      student  : { $in: classData.students },
+      examName : String(examType || '').trim(),
+      session  : String(examYear || '').trim(),
+    };
+
+    const r = await Mark.updateMany(filter, { isPublished: false });
+    return ok(res, { modifiedCount: r.modifiedCount }, `${r.modifiedCount} results unpublished`);
+  } catch (err) { return fail(res, 500, 'Failed to unpublish', err); }
+};
 
 // ═══════════════════════════════════════════════════════════════
 //  POST /api/marks  — save / upsert one student's marks
@@ -170,20 +414,77 @@ exports.saveMarks = async (req, res) => {
 
 // ═══════════════════════════════════════════════════════════════
 //  POST /api/marks/bulk
+//
+//  Supports TWO formats:
+//
+//  Format A — from Marks.js (simple, class-level):
+//  { classId, examType, examYear, marksData: [{studentId, subjects:[{subjectName, theoryObtained, ...}]}] }
+//
+//  Format B — from markService.js / MarkManagement.jsx (detailed):
+//  { entries: [{studentId, examName, session, subjects:[{cqP1, ...}]}] }
 // ═══════════════════════════════════════════════════════════════
 exports.saveBulkMarks = async (req, res) => {
   try {
-    const { entries = [] } = req.body;
-    if (!entries.length) return fail(res, 400, 'entries[] required');
+    let entries = req.body.entries;
+
+    // ── Format A: from Marks.js ──────────────────────────────
+    if (!entries && req.body.marksData) {
+      const { examType, examYear, marksData, classId } = req.body;
+
+      if (!examType) return fail(res, 400, 'examType is required');
+
+      // Get class name for storing in mark record (optional but nice)
+      let className = '';
+      if (isValidId(classId)) {
+        const cls = await Class.findById(classId).select('name section').lean();
+        if (cls) className = cls.section ? `${cls.name} (${cls.section})` : cls.name;
+      }
+
+      entries = (marksData || []).map(e => ({
+        studentId : e.studentId,
+        examName  : String(examType).trim(),
+        session   : String(examYear || '').trim(),
+        className,
+        subjects  : convertSimpleSubjects(e.subjects || []),
+      }));
+    }
+
+    if (!entries?.length) return fail(res, 400, 'entries[] or marksData[] required');
+
     const results = [];
     for (const e of entries) {
-      const { studentId, examName, session = '', subjects = [], ...rest } = e;
+      const { studentId, examName, session = '', subjects = [], className = '', ...rest } = e;
       if (!isValidId(studentId)) { results.push({ studentId, error: 'Invalid id' }); continue; }
-      const filter = { student: studentId, examName: String(examName).trim(), session: String(session).trim() };
+
+      const filter = {
+        student  : studentId,
+        examName : String(examName).trim(),
+        session  : String(session).trim(),
+      };
+
+      // Determine if subjects are already in backend format (have cqP1) or still simple
+      const clean = subjects.length && (subjects[0].cqP1 !== undefined || subjects[0].code !== undefined)
+        ? sanitizeSubjects(subjects)
+        : subjects; // already converted by convertSimpleSubjects above
+
       let mark = await Mark.findOne(filter);
-      const clean = sanitizeSubjects(subjects);
-      if (mark) { mark.subjects = clean; mark.updatedBy = req.user?._id; Object.assign(mark, rest); }
-      else       { mark = new Mark({ student: studentId, examName: String(examName).trim(), session: String(session).trim(), subjects: clean, createdBy: req.user?._id, updatedBy: req.user?._id, ...rest }); }
+      if (mark) {
+        mark.subjects  = clean;
+        mark.updatedBy = req.user?._id;
+        if (className) mark.className = className;
+        Object.assign(mark, rest);
+      } else {
+        mark = new Mark({
+          student  : studentId,
+          examName : String(examName).trim(),
+          session  : String(session).trim(),
+          subjects : clean,
+          className,
+          createdBy: req.user?._id,
+          updatedBy: req.user?._id,
+          ...rest,
+        });
+      }
       await mark.save();
       results.push({ studentId, markId: mark._id, result: mark.result });
     }
