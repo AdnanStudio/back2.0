@@ -14,7 +14,15 @@ const generateToken = (id) => {
 // @route   POST /api/auth/register
 exports.register = async (req, res) => {
   try {
-    const { name, email, password, role, phone, address, dateOfBirth } = req.body;
+    const { name, email, password, phone, address, dateOfBirth } = req.body;
+
+    // SECURITY: this endpoint is public (no auth required), so we never trust
+    // a `role` field from the request body — anyone could otherwise register
+    // as 'admin' by calling the API directly (bypassing the frontend form,
+    // which only ever sends role:'student' anyway). Admin/teacher/staff/
+    // librarian/accountant accounts can only be created by an existing admin
+    // via POST /api/users/create (protect + isAdmin).
+    const role = 'student';
 
     console.log('Registration attempt:', { email, role });
 
@@ -41,7 +49,7 @@ exports.register = async (req, res) => {
       name,
       email,
       password, // pre-save middleware hash করবে
-      role: role || 'student',
+      role,
       phone,
       address,
       dateOfBirth,

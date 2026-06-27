@@ -55,6 +55,22 @@ const settingsSchema = new mongoose.Schema({
     publicId: String
   },
 
+  // Important Links — shown on the public home page, admin editable
+  importantLinks: [{
+    label: {
+      type: String,
+      required: true
+    },
+    url: {
+      type: String,
+      required: true
+    },
+    order: {
+      type: Number,
+      default: 0
+    }
+  }],
+
   // Other Settings (existing)
   schoolName: String,
   schoolAddress: String,
@@ -92,7 +108,13 @@ settingsSchema.statics.getSettings = async function() {
       ],
       heroImages: [],
       schoolName: 'MALKHANAGAR COLLEGE',
-      schoolAddress: 'Malkhanagar, Sirajdikhan, Dhaka'
+      schoolAddress: 'Malkhanagar, Sirajdikhan, Dhaka',
+      importantLinks: [
+        { label: 'শিক্ষা মন্ত্রণালয়', url: 'https://moedu.gov.bd', order: 0 },
+        { label: 'মাধ্যমিক ও উচ্চশিক্ষা বোর্ড', url: 'https://dhakaeducationboard.gov.bd', order: 1 },
+        { label: 'জাতীয় বিশ্ববিদ্যালয়', url: 'https://nu.ac.bd', order: 2 },
+        { label: 'শিক্ষা বোর্ড রেজাল্ট', url: 'http://www.educationboardresults.gov.bd', order: 3 },
+      ]
     });
   }
   return settings;

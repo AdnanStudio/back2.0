@@ -23,7 +23,7 @@ exports.createPaymentRequest = async (req, res) => {
 
     // Create notification for student
     await Notification.create({
-      recipient: studentData.userId._id,
+      recipient: studentData.userId?._id || studentData.userId,
       type: 'payment',
       title: 'New Payment Request',
       message: `You have a new payment request of ৳${amount} for ${purpose}`,
@@ -190,7 +190,7 @@ exports.updatePaymentStatus = async (req, res) => {
     // Notify student
     const student = await Student.findById(payment.student).populate('userId');
     await Notification.create({
-      recipient: student.userId._id,
+      recipient: student.userId?._id || student.userId,
       type: 'payment',
       title: 'Payment Status Updated',
       message: `Your payment status has been updated to: ${status}`,

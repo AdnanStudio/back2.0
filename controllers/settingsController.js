@@ -519,3 +519,150 @@ exports.deleteNoticeImage = async (req, res) => {
     });
   }
 };
+
+// ============================================
+// IMPORTANT LINKS MANAGEMENT (Public Home page)
+// ============================================
+
+// Add Important Link
+exports.addImportantLink = async (req, res) => {
+  try {
+    const { label, url, order } = req.body;
+
+    if (!label || !url) {
+      return res.status(400).json({
+        success: false,
+        message: 'Label and URL are required'
+      });
+    }
+
+    const settings = await Settings.getSettings();
+
+    settings.importantLinks.push({
+      label,
+      url,
+      order: order !== undefined ? order : settings.importantLinks.length
+    });
+
+    settings.updatedBy = req.user._id;
+    await settings.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Important link added successfully',
+      data: settings.importantLinks
+    });
+  } catch (error) {
+    console.error('Error adding important link:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to add important link',
+      error: error.message
+    });
+  }
+};
+
+// Update Important Link
+exports.updateImportantLink = async (req, res) => {
+  try {
+    const { linkId } = req.params;
+    const { label, url, order } = req.body;
+
+    const settings = await Settings.getSettings();
+
+    const link = settings.importantLinks.id(linkId);
+    if (!link) {
+      return res.status(404).json({
+        success: false,
+        message: 'Important link not found'
+      });
+    }
+
+    if (label !== undefined) link.label = label;
+    if (url !== undefined) link.url = url;
+    if (order !== undefined) link.order = order;
+
+    settings.updatedBy = req.user._id;
+    await settings.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Important link updated successfully',
+      data: settings.importantLinks
+    });
+  } catch (error) {
+    console.error('Error updating important link:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update important link',
+      error: error.message
+    });
+  }
+};
+
+// Delete Important Link
+exports.deleteImportantLink = async (req, res) => {
+  try {
+    const { linkId } = req.params;
+
+    const settings = await Settings.getSettings();
+
+    settings.importantLinks = settings.importantLinks.filter(
+      item => item._id.toString() !== linkId
+    );
+
+    settings.updatedBy = req.user._id;
+    await settings.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Important link deleted successfully',
+      data: settings.importantLinks
+    });
+  } catch (error) {
+    console.error('Error deleting important link:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete important link',
+      error: error.message
+    });
+  }
+};
+
+// Reorder Important Links (replace the whole ordered list at once)
+exports.reorderImportantLinks = async (req, res) => {
+  try {
+    const { links } = req.body; // [{ _id, order }]
+
+    if (!Array.isArray(links)) {
+      return res.status(400).json({
+        success: false,
+        message: 'links must be an array'
+      });
+    }
+
+    const settings = await Settings.getSettings();
+
+    links.forEach(({ _id, order }) => {
+      const link = settings.importantLinks.id(_id);
+      if (link) link.order = order;
+    });
+
+    settings.updatedBy = req.user._id;
+    await settings.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Important links reordered successfully',
+      data: settings.importantLinks
+    });
+  } catch (error) {
+    console.error('Error reordering important links:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reorder important links',
+      error: error.message
+    });
+  }
+};
+

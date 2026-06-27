@@ -149,7 +149,7 @@ exports.getAllStudents = async (req, res) => {
     let filteredStudents = students;
     if (search) {
       filteredStudents = students.filter(student =>
-        student.userId.name.toLowerCase().includes(search.toLowerCase()) ||
+        student.userId?.name?.toLowerCase().includes(search.toLowerCase()) ||
         student.studentId.toLowerCase().includes(search.toLowerCase())
       );
     }

@@ -190,11 +190,25 @@ MarkSchema.pre('save', function () {
       return;
     }
 
+    // Ensure program is valid
+    const validPrograms = ['HSC', 'Degree', 'Honours', 'Other'];
+    if (!validPrograms.includes(this.program)) {
+      this.program = 'Degree';
+    }
+
     let sumObt = 0, sumFull = 0, sumGP = 0;
     let counted = 0, hasFail = false;
 
     for (const sub of this.subjects) {
-      computeSubjectGrade(sub);                 // mutates sub in place
+      try {
+        computeSubjectGrade(sub);               // mutates sub in place
+      } catch (subErr) {
+        console.error('[Mark pre-save] computeSubjectGrade error:', subErr.message, JSON.stringify(sub));
+        sub.status = 'pending';
+        sub.grade = '—';
+        sub.gradePoint = 0;
+        continue;
+      }
 
       if (sub.status === 'absent') continue;    // skip absent subjects
 

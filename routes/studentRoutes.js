@@ -25,15 +25,15 @@ router.get('/profile', authorize('student'), getStudentProfile);
 
 // Admin and Teacher can create, view students
 router.route('/')
-  .get(getAllStudents)
+  .get(authorize('admin', 'teacher'), getAllStudents)
   .post(authorize('admin', 'teacher'), uploadStudentProfile.single('profileImage'), createStudent);
 
-// Get students by class
-router.get('/class/:className/:section', getStudentsByClass);
+// Get students by class — admin/teacher only
+router.get('/class/:className/:section', authorize('admin', 'teacher'), getStudentsByClass);
 
-// Single student operations
+// Single student operations — admin/teacher only (students use /profile for their own data)
 router.route('/:id')
-  .get(getStudent)
+  .get(authorize('admin', 'teacher'), getStudent)
   .put(authorize('admin', 'teacher'), uploadStudentProfile.single('profileImage'), updateStudent)
   .delete(authorize('admin'), deleteStudent);
 

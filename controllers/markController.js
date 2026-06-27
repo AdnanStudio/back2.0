@@ -343,9 +343,13 @@ exports.saveMarks = async (req, res) => {
   try {
     const {
       studentId, examName, examYear = '', session = '',
-      program = 'Degree', className = '', section = '',
+      program: rawProgram, className = '', section = '',
       subjects = [], isPublished = false, remarks = '',
     } = req.body;
+
+    // Validate and sanitize program
+    const validPrograms = ['HSC', 'Degree', 'Honours', 'Other'];
+    const program = validPrograms.includes(rawProgram) ? rawProgram : 'Degree';
 
     if (!studentId)            return fail(res, 400, 'studentId is required');
     if (!examName?.trim())     return fail(res, 400, 'examName is required');
@@ -453,40 +457,63 @@ exports.saveBulkMarks = async (req, res) => {
 
     const results = [];
     for (const e of entries) {
-      const { studentId, examName, session = '', subjects = [], className = '', ...rest } = e;
-      if (!isValidId(studentId)) { results.push({ studentId, error: 'Invalid id' }); continue; }
+      try {
+        const { studentId, examName, session = '', subjects = [], className = '', ...rest } = e;
+        if (!isValidId(studentId)) { results.push({ studentId, error: 'Invalid id' }); continue; }
 
-      const filter = {
-        student  : studentId,
-        examName : String(examName).trim(),
-        session  : String(session).trim(),
-      };
+        const safeExamName = String(examName || '').trim();
+        if (!safeExamName) { results.push({ studentId, error: 'examName is required' }); continue; }
 
-      // Determine if subjects are already in backend format (have cqP1) or still simple
-      const clean = subjects.length && (subjects[0].cqP1 !== undefined || subjects[0].code !== undefined)
-        ? sanitizeSubjects(subjects)
-        : subjects; // already converted by convertSimpleSubjects above
-
-      let mark = await Mark.findOne(filter);
-      if (mark) {
-        mark.subjects  = clean;
-        mark.updatedBy = req.user?._id;
-        if (className) mark.className = className;
-        Object.assign(mark, rest);
-      } else {
-        mark = new Mark({
+        const filter = {
           student  : studentId,
-          examName : String(examName).trim(),
+          examName : safeExamName,
           session  : String(session).trim(),
-          subjects : clean,
-          className,
-          createdBy: req.user?._id,
-          updatedBy: req.user?._id,
-          ...rest,
-        });
+        };
+
+        // Determine if subjects are already in backend format (have cqP1) or still simple
+        let clean = [];
+        try {
+          clean = subjects.length && (subjects[0].cqP1 !== undefined || subjects[0].code !== undefined)
+            ? sanitizeSubjects(subjects)
+            : subjects; // already converted by convertSimpleSubjects above
+        } catch (sanitizeErr) {
+          console.error('[markController] sanitizeSubjects error:', sanitizeErr.message);
+          clean = [];
+        }
+
+        // Validate program enum
+        const validPrograms = ['HSC', 'Degree', 'Honours', 'Other'];
+        const safeProgram = validPrograms.includes(rest.program) ? rest.program : 'Degree';
+
+        let mark = await Mark.findOne(filter);
+        if (mark) {
+          mark.subjects  = clean;
+          mark.updatedBy = req.user?._id;
+          if (className) mark.className = className;
+          if (safeProgram) mark.program = safeProgram;
+          // Spread rest but exclude program to avoid overwriting
+          const { program: _p, ...safeRest } = rest;
+          Object.assign(mark, safeRest);
+        } else {
+          const { program: _p, ...safeRest } = rest;
+          mark = new Mark({
+            student  : studentId,
+            examName : safeExamName,
+            session  : String(session).trim(),
+            subjects : clean,
+            className,
+            program  : safeProgram,
+            createdBy: req.user?._id,
+            updatedBy: req.user?._id,
+            ...safeRest,
+          });
+        }
+        await mark.save();
+        results.push({ studentId, markId: mark._id, result: mark.result });
+      } catch (entryErr) {
+        console.error('[markController] saveBulkMarks entry error:', entryErr.message);
+        results.push({ studentId: e.studentId, error: entryErr.message });
       }
-      await mark.save();
-      results.push({ studentId, markId: mark._id, result: mark.result });
     }
     return ok(res, { count: results.length, data: results }, 'Bulk marks saved');
   } catch (err) { return fail(res, 500, 'Bulk save failed', err); }

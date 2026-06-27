@@ -20,10 +20,13 @@ router.post('/', authorize('admin', 'teacher'), markAttendance);
 router.post('/bulk', authorize('admin', 'teacher'), markBulkAttendance);
 router.post('/mark-all-present', authorize('admin', 'teacher'), markAllPresent);
 
-// Get attendance routes
-router.get('/class/:classId', getAttendanceByClass);
-router.get('/student/:studentId', getAttendanceByStudent);
-router.get('/report/:classId', getAttendanceReport);
+// Get attendance routes — admin/teacher only (matches Attendance.js /
+// AttendanceReport.js dashboard access). Without this, any logged-in
+// user (student, staff, librarian, accountant) could look up any other
+// student's attendance, or a whole class's attendance, by ID.
+router.get('/class/:classId', authorize('admin', 'teacher'), getAttendanceByClass);
+router.get('/student/:studentId', authorize('admin', 'teacher'), getAttendanceByStudent);
+router.get('/report/:classId', authorize('admin', 'teacher'), getAttendanceReport);
 
 // Update and delete routes
 router.route('/:id')

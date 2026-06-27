@@ -70,7 +70,7 @@ exports.getAllRoutines = async (req, res) => {
           message: 'Student profile not found'
         });
       }
-      query.class = student.class._id;
+      if (student.class) query.class = student.class._id || student.class;
     } else if (req.user.role === 'teacher') {
       const teacher = await Teacher.findOne({ userId: req.user._id });
       if (!teacher) {
@@ -90,7 +90,7 @@ exports.getAllRoutines = async (req, res) => {
           ...day.toObject(),
           periods: day.periods.map(period => ({
             ...period.toObject(),
-            isMyClass: period.teacher._id.toString() === teacher._id.toString()
+            isMyClass: period.teacher?._id?.toString() === teacher._id.toString()
           }))
         }));
 
@@ -144,7 +144,7 @@ exports.getRoutineById = async (req, res) => {
     if (req.user.role === 'student') {
       const Student = require('../models/Student');
       const student = await Student.findOne({ userId: req.user._id });
-      if (routine.class._id.toString() !== student.class.toString()) {
+      if (!routine.class || routine.class._id.toString() !== student.class.toString()) {
         return res.status(403).json({
           success: false,
           message: 'Access denied'

@@ -36,6 +36,8 @@ app.use('/api/notifications',     require('./routes/notificationRoutes'));
 app.use('/api/principal',         require('./routes/principalRoutes'));
 app.use('/api/website',           require('./routes/websiteRoutes'));
 app.use('/api/settings',          require('./routes/settingsRoutes'));
+app.use('/api/navigation',        require('./routes/navigationRoutes'));
+app.use('/api/content',           require('./routes/contentPageRoutes'));
 app.use('/api/users',             require('./routes/userRoutes'));
 app.use('/api/subjects',          require('./routes/subjectRoutes'));
 app.use('/api/admissions',        require('./routes/admissionRoutes'));

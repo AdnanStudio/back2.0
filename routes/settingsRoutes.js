@@ -132,4 +132,40 @@ router.delete(
   settingsController.deleteNoticeImage
 );
 
+// ============================================
+// IMPORTANT LINKS ROUTES (Public Home page)
+// ============================================
+
+// Add Important Link
+router.post(
+  '/important-links',
+  protect,
+  authorize('admin', 'teacher'),
+  settingsController.addImportantLink
+);
+
+// Update Important Link
+router.put(
+  '/important-links/:linkId',
+  protect,
+  authorize('admin', 'teacher'),
+  settingsController.updateImportantLink
+);
+
+// Delete Important Link
+router.delete(
+  '/important-links/:linkId',
+  protect,
+  authorize('admin', 'teacher'),
+  settingsController.deleteImportantLink
+);
+
+// Reorder Important Links
+router.put(
+  '/important-links-reorder',
+  protect,
+  authorize('admin', 'teacher'),
+  settingsController.reorderImportantLinks
+);
+
 module.exports = router;
